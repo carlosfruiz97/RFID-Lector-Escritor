@@ -39,6 +39,9 @@
 #include <SPI.h>
 #include <MFRC522.h>
 
+// ==== PARAMETERS ===============================================
+#define USING_ULTRALIGHT   1
+
 // ==== RFID =====================================================
 #define RST_PIN         9          // Configurable, see typical pin layout above
 #define SS_PIN          10         // Configurable, see typical pin layout above
@@ -70,10 +73,12 @@ void setup()
   delay(4);
   mfrc522.PCD_DumpVersionToSerial();
 
-  LOGN("SERIAL COMMANDS: "); 
+  LOGN("SERIAL COMMANDS: ");
   LOGN("> ID        \t Returns id of card");
+  LOGN("> dumpinfo  \t Dups Info");
   LOGN("> R 4 0     \t Reads data in row 4 col 0");
   LOGN("> W 4 0 255 \t Writes 255 in row 4 column 0\n\n");
+
 
 
 }
@@ -134,7 +139,29 @@ void loop ()
 
     }
 
+    if (recieved.indexOf("DUMPINFO") != -1 ) {
+      LOGN("\n DUMPING INFO");
+      while (!DumpInfo()) delay(10);
+      LOGN("DONE");
+    }
+
   }
+}
+// ==== DUMP INFO ==============================================
+bool DumpInfo()
+{
+  if ( ! mfrc522.PICC_IsNewCardPresent()) {
+    return false;
+  }
+
+  // Select one of the cards
+  if ( ! mfrc522.PICC_ReadCardSerial()) {
+    return false;
+  }
+  mfrc522.PICC_DumpToSerial(&(mfrc522.uid));
+
+  LOGN("PICC TYPE");
+  return true;
 }
 
 // ==== GET RDIF ID ==============================================
@@ -184,22 +211,30 @@ bool ReadData(byte blockAddr, byte column, byte & result)
   for (byte i = 0; i < 6; i++) key.keyByte[i] = 0xFF;
 
   //some variables we need
-  byte len = 18;
+  //  byte len = 18;
   byte buffer1[18];
+  byte len =  sizeof(buffer1);
   MFRC522::StatusCode status;
 
   if (mfrc522.PICC_IsNewCardPresent() && mfrc522.PICC_ReadCardSerial())
   {
 
-    // 1. AUTHENTICATE
-    status = mfrc522.PCD_Authenticate(MFRC522::PICC_CMD_MF_AUTH_KEY_A, 4, &key, &(mfrc522.uid));
-    if (status != MFRC522::STATUS_OK) {
-      LOG(F("Authentication failed: "));
-      LOGN(mfrc522.GetStatusCodeName(status));
-      ResetRFID();
-      return false;
-    }
+    // GET TYPE
+    MFRC522::PICC_Type piccType = mfrc522.PICC_GetType(mfrc522.uid.sak);
 
+    if (piccType != MFRC522::PICC_TYPE_MIFARE_UL)
+    {
+
+      // 1. AUTHENTICATE
+      status = mfrc522.PCD_Authenticate(MFRC522::PICC_CMD_MF_AUTH_KEY_A, 4, &key, &(mfrc522.uid));
+      if (status != MFRC522::STATUS_OK) {
+        LOG(F("Authentication failed: "));
+        LOGN(mfrc522.GetStatusCodeName(status));
+        ResetRFID();
+        return false;
+      }
+    }
+#
     // 2. READ DATA
     status = mfrc522.MIFARE_Read(blockAddr, buffer1, &len);
     if (status != MFRC522::STATUS_OK) {
@@ -238,48 +273,71 @@ bool WriteRFID(byte blockAddr, byte column, byte val)
 
   // Reset the loop if no new card present on the sensor/reader. This saves the entire process when idle.
   if ( ! mfrc522.PICC_IsNewCardPresent()) {
-//    LOG("\t\t Card not present");
+    //    LOG("\t\t Card not present");
     return false;
   }
 
   // Select one of the cards
   if ( ! mfrc522.PICC_ReadCardSerial()) {
-//    LOG("\t\t Cant Read");
+    //    LOG("\t\t Cant Read");
     return false;
   }
 
-  byte dataBlock[]    = {
-    0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00
-  };
-  dataBlock[column] = val;
-
-  // Prepare key - all keys are set to FFFFFFFFFFFFh at chip delivery from the factory.
-  MFRC522::MIFARE_Key key;
-  for (byte i = 0; i < 6; i++) key.keyByte[i] = 0xFF;
 
   MFRC522::StatusCode status;
 
-  // 1. AUTHENTICATE USING KEY A
-  Serial.println(F("Authenticating using key A..."));
-  status = mfrc522.PCD_Authenticate(MFRC522::PICC_CMD_MF_AUTH_KEY_A, blockAddr, &key, &(mfrc522.uid));
-  if (status != MFRC522::STATUS_OK) {
-    Serial.print(F("PCD_Authenticate() failed: "));
-    Serial.println(mfrc522.GetStatusCodeName(status));
-    return false;
-  }
-  else Serial.println(F("PCD_Authenticate() success: "));
+  MFRC522::PICC_Type piccType = mfrc522.PICC_GetType(mfrc522.uid.sak);
 
-  // 2. WRITE BLOCK
-  status = mfrc522.MIFARE_Write(blockAddr, dataBlock, 16);
-  if (status != MFRC522::STATUS_OK) {
-    Serial.print(F("MIFARE_Write() failed: "));
-    Serial.println(mfrc522.GetStatusCodeName(status));
-    return false;
+  if (piccType != MFRC522::PICC_TYPE_MIFARE_UL)
+  {
+
+    // ------------- USING NORMAL TAGS ---------------------
+    byte dataBlock[]    = {
+      0x00, 0x00, 0x00, 0x00,
+      0x00, 0x00, 0x00, 0x00,
+      0x00, 0x00, 0x00, 0x00,
+      0x00, 0x00, 0x00, 0x00
+    };
+    dataBlock[column] = val;
+
+    // Prepare key - all keys are set to FFFFFFFFFFFFh at chip delivery from the factory.
+    MFRC522::MIFARE_Key key;
+    for (byte i = 0; i < 6; i++) key.keyByte[i] = 0xFF;
+
+    // 1. AUTHENTICATE USING KEY A
+    Serial.println(F("Authenticating using key A..."));
+    status = mfrc522.PCD_Authenticate(MFRC522::PICC_CMD_MF_AUTH_KEY_A, blockAddr, &key, &(mfrc522.uid));
+    if (status != MFRC522::STATUS_OK) {
+      Serial.print(F("PCD_Authenticate() failed: "));
+      Serial.println(mfrc522.GetStatusCodeName(status));
+      return false;
+    }
+    else Serial.println(F("PCD_Authenticate() success: "));
+
+    // 2. WRITE BLOCK
+    status = mfrc522.MIFARE_Write(blockAddr, dataBlock, 16);
+    if (status != MFRC522::STATUS_OK) {
+      Serial.print(F("MIFARE_Write() failed: "));
+      Serial.println(mfrc522.GetStatusCodeName(status));
+      return false;
+    }
+
+  } else {
+    // ------------- USING ULTRALIGHT TAGS ---------------------
+    byte dataBlock[4]    = {
+      0x00, 0x00, 0x00, 0x00
+    };
+    dataBlock[column] = val;
+
+    status = (MFRC522::StatusCode) mfrc522.MIFARE_Ultralight_Write(blockAddr, dataBlock, 4);
+    if (status != MFRC522::STATUS_OK) {
+      Serial.print(F("MIFARE_Read() failed: "));
+      Serial.println(mfrc522.GetStatusCodeName(status));
+      return false;
+    }
+
   }
-  else Serial.println(F("MIFARE_Write() success: "));
+
 
   // Halt PICC
   mfrc522.PICC_HaltA();
