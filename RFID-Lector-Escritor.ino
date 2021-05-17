@@ -70,8 +70,10 @@ void setup()
   delay(4);
   mfrc522.PCD_DumpVersionToSerial();
 
-  LOG("COMMANDS: \n >ID \t (Returns id of card)\n >R 4 0 \t Reads data in row 4 col 0\n");
-  LOGN(" >W 4 0 255 \t Writes 255 in row 4 column 0\n\n");
+  LOGN("SERIAL COMMANDS: "); 
+  LOGN("> ID        \t Returns id of card");
+  LOGN("> R 4 0     \t Reads data in row 4 col 0");
+  LOGN("> W 4 0 255 \t Writes 255 in row 4 column 0\n\n");
 
 
 }
@@ -236,13 +238,13 @@ bool WriteRFID(byte blockAddr, byte column, byte val)
 
   // Reset the loop if no new card present on the sensor/reader. This saves the entire process when idle.
   if ( ! mfrc522.PICC_IsNewCardPresent()) {
-    LOG("\t\t Card not present");
+//    LOG("\t\t Card not present");
     return false;
   }
 
   // Select one of the cards
   if ( ! mfrc522.PICC_ReadCardSerial()) {
-    LOG("\t\t Cant Read");
+//    LOG("\t\t Cant Read");
     return false;
   }
 
