@@ -45,6 +45,13 @@
 
 MFRC522 mfrc522(SS_PIN, RST_PIN);  // Create MFRC522 instance
 
+// ==== FUNCTIONS ================================================
+bool GetUid(MFRC522::Uid & foundUid);
+void printID(MFRC522::Uid & foundUid);
+bool ReadData(byte blockAddr, byte column, byte & result);
+void ResetRFID();
+bool WriteRFID(byte blockAddr, byte column, byte val);
+
 // ===============================================================
 //            SETUP
 // ===============================================================
@@ -63,13 +70,69 @@ void setup()
   delay(4);
   mfrc522.PCD_DumpVersionToSerial();
 
+  LOG("COMMANDS: \n >ID \t (Returns id of card)\n >R 4 0 \t Reads data in row 4 col 0\n");
+  LOGN(" >W 4 0 255 \t Writes 255 in row 4 column 0\n\n");
+
+
 }
 
 
 void loop ()
 {
+  if (Serial.available())
+  {
+    String recieved = Serial.readStringUntil('\n');
+    // to uppder case
+    recieved.toUpperCase();
 
-  WriteRFID(4, 0, 1);
+    // --- Uid ------------------------------
+    if (recieved.indexOf("ID") != -1 ) {
+
+      LOGN("\n > Requesting Uid. PASS CARD");
+      MFRC522::Uid foundUid;
+      while (!GetUid(foundUid)) {
+        delay(50);  //wait
+      }
+      LOGN("Card Found");
+      printID(foundUid);
+
+    }
+
+    // --- WRITE DATA-------------------------
+    if (recieved.indexOf("W") != -1 ) {
+      int first_space = recieved.indexOf(" ", 0);
+      int second_space = recieved.indexOf(" ", first_space + 1);
+      int third_space = recieved.indexOf(" ", second_space + 1);
+
+      byte row = recieved.substring(first_space, second_space).toInt();
+      byte col = recieved.substring(second_space, third_space).toInt();
+      byte val = recieved.substring(third_space).toInt();
+
+      LOG("\n > Writing to row "); LOG(row); LOG(", col "); LOG(col);
+      LOG(", value "); LOG(val); LOGN("\t PASS CARD");
+
+      while (! WriteRFID(row, col, val)) delay(10);
+      LOGN("\t > SUCESS");
+    }
+
+    // --- READ DATA -------------------------
+    if (recieved.indexOf("R") != -1 ) {
+      int first_space = recieved.indexOf(" ", 0);
+      int second_space = recieved.indexOf(" ", first_space + 1);
+
+      byte row = recieved.substring(first_space, second_space).toInt();
+      byte col = recieved.substring(second_space).toInt();
+      LOG("\n > Reading row "); LOG(row); LOG(", col "); LOG(col);
+      LOGN("\t PASS CARD");
+
+      byte res;
+      while (!ReadData(row, col, res) ) delay(10);
+      LOG("\t > Result: "); LOG(res);
+      LOG("\t(0x"); Serial.print(res, HEX); LOGN(")");
+
+    }
+
+  }
 }
 
 // ==== GET RDIF ID ==============================================
@@ -93,9 +156,6 @@ bool GetUid(MFRC522::Uid & foundUid)
 
   foundUid = mfrc522.uid;
 
-  LOG("ID FOUND: ");
-  printID(foundUid.uidByte, foundUid.size);
-
   // Halt PICC
   mfrc522.PICC_HaltA();
   // Stop encryption on PCD
@@ -104,11 +164,12 @@ bool GetUid(MFRC522::Uid & foundUid)
 
 }
 
-void printID(byte *buffer, byte bufferSize)
+void printID(MFRC522::Uid & foundUid)
 {
-  for (byte i = 0; i < bufferSize; i++) {
-    Serial.print(buffer[i] < 0x10 ? " 0" : " ");
-    Serial.print(buffer[i], HEX);
+  LOGN("\t > Card ID (hex): ");
+  for (byte i = 0; i < foundUid.size; i++) {
+    Serial.print(foundUid.uidByte[i] < 0x10 ? " 0" : " ");
+    Serial.print(foundUid.uidByte[i], HEX);
   }
   LOGN("");
 }
@@ -172,14 +233,19 @@ void ResetRFID()
 // ==== WRITE RFID ===============================================
 bool WriteRFID(byte blockAddr, byte column, byte val)
 {
+
+  // Reset the loop if no new card present on the sensor/reader. This saves the entire process when idle.
   if ( ! mfrc522.PICC_IsNewCardPresent()) {
+    LOG("\t\t Card not present");
     return false;
   }
 
   // Select one of the cards
   if ( ! mfrc522.PICC_ReadCardSerial()) {
+    LOG("\t\t Cant Read");
     return false;
   }
+
   byte dataBlock[]    = {
     0x00, 0x00, 0x00, 0x00,
     0x00, 0x00, 0x00, 0x00,
@@ -193,16 +259,6 @@ bool WriteRFID(byte blockAddr, byte column, byte val)
   for (byte i = 0; i < 6; i++) key.keyByte[i] = 0xFF;
 
   MFRC522::StatusCode status;
-
-  // Reset the loop if no new card present on the sensor/reader. This saves the entire process when idle.
-  if ( ! mfrc522.PICC_IsNewCardPresent()) {
-    return false;
-  }
-
-  // Select one of the cards
-  if ( ! mfrc522.PICC_ReadCardSerial()) {
-    return false;
-  }
 
   // 1. AUTHENTICATE USING KEY A
   Serial.println(F("Authenticating using key A..."));
